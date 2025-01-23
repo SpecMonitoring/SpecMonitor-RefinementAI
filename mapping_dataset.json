@@ -1,0 +1,258 @@
+{
+    "examples": [
+        {
+            "name": "simple_1",
+            "tla_code": "\n--------------------------- MODULE BlockingQueue ---------------------------\nEXTENDS Naturals, Sequences, FiniteSets\n\nCONSTANTS Producers,Consumers,BufCapacity\n\nVARIABLES buffer, waitSet\nvars == <<buffer, waitSet>>\n\n(* Initially, the buffer is empty and no thread is waiting. *)\nInit == /\\ buffer = <<>>\n        /\\ waitSet = {}\n\nRunningThreads == (Producers \\cup Consumers) \\ waitSet\n\nNotifyOther(Others) == \n    IF waitSet \\cap Others # {}\n    THEN \\E t \\in waitSet \\cap Others : waitSet' = waitSet \\ {t}\n    ELSE UNCHANGED waitSet\n\n(* @see java.lang.Object#wait *)\nWait(t) == /\\ waitSet' = waitSet \\cup {t}\n           /\\ UNCHANGED <<buffer>>\n           \nPut(t, d) ==\n/\\ t \notin waitSet\n/\\ \\/ /\\ Len(buffer) < BufCapacity\n      /\\ buffer' = Append(buffer, d)\n      /\\ NotifyOther(Consumers)\n   \\/ /\\ Len(buffer) = BufCapacity\n      /\\ Wait(t)\n      \nGet(t) ==\n/\\ t \notin waitSet\n/\\ \\/ /\\ buffer # <<>>\n      /\\ buffer' = Tail(buffer)\n      /\\ NotifyOther(Producers)\n   \\/ /\\ buffer = <<>>\n      /\\ Wait(t)\n\nNext == \\/ \\E p \\in Producers: Put(p, p) \\* Add some data to buffer\n        \\/ \\E c \\in Consumers: Get(c)\n\nMySeq(P) == UNION {[1..n -> P] : n \\in 0..BufCapacity}\n\nSpec == Init /\\ [][Next]_vars\n\nPutEnabled == \\A p \\in Producers : ENABLED Put(p, p)\n\nStarvation ==\n    /\\ \\A p \\in Producers: []<>(<<Put(p, p)>>_vars)\n    /\\ \\A c \\in Consumers: []<>(<<Get(c)>>_vars)\n\n=============================================================================\n    ",
+            "java_code": "\npublic final class BlockingQueue<E> {\n\n\tprivate final E[] store;\n\t\n\tprivate final ReentrantLock lock;\n\tprivate final Condition waitC;\n\tprivate final Condition waitP;\n\t\n\tprivate int head;\n\tprivate int tail;\n\tprivate int size;\n\n\t@SuppressWarnings(\"unchecked\")\n\tpublic BlockingQueue(final int capacity) {\n\t\tthis.store = (E[]) new Object[capacity];\n\t\t\n\t\t// see BlockingQueueSplit.tla\n\t\tthis.lock = new ReentrantLock();\n\t\tthis.waitC = lock.newCondition();\n\t\tthis.waitP = lock.newCondition();\n\t}\n\n\t/**\n\t * Add the given element to this queue waiting if necessary for space to become\n\t * available.\n\t * \n\t * @see {@link BlockingQueue#take()}.\n\t */\n\tpublic void put(final E e) throws InterruptedException {\n\t\tfinal ReentrantLock lock = this.lock;\n\t\tlock.lock();\n\t\ttry {\n\t\t\twhile (isFull()) {\n\t\t\t\tnew BufferWaitEvent(\"p\").commit();\n\t\t\t\tSystem.out.println(\"Buffer full; P waits\");\n\t\t\t\twaitP.await();\n\t\t\t\tSystem.out.println(\"P notified\");\n\t\t\t}\n\t\t\twaitC.signal();\n\n\t\t\t// Add e and do bookkeeping.\n\t\t\tnew BufferEnqEvent().commit();\n\t\t\tappend(e);\n\t\t} finally {\n\t\t\tlock.unlock();\n\t\t}\n\t}\n\n\t/**\n\t * Remove an element E from this queue, waiting if necessary until an element\n\t * becomes available.\n\t * \n\t * @see {@link BlockingQueue#put(Object)}.\n\t */\n\tpublic E take() throws InterruptedException {\n        final ReentrantLock lock = this.lock;\n        lock.lock();\n        try {\n    \t\twhile (isEmpty()) {\n    \t\t\tnew BufferWaitEvent(\"c\").commit();\n    \t\t\tSystem.out.println(\"Buffer empty; C waits\");\n    \t\t\twaitC.await();\n    \t\t\tSystem.out.println(\"C notified\");\n    \t\t}\n    \t\twaitP.signal();\n    \t\t\n    \t\t// Remove e and do bookkeeping.\n    \t\tnew BufferDeqEvent().commit();\n    \t\treturn head();\n        } finally {\n            lock.unlock();\n        }\n\t}\n\t\n\t\n\t//****** auxiliary methods ******//\n\n\tprivate void append(final E e) {\n\t\tstore[tail] = e;\n\t\ttail = next(tail);\n\t\tsize++;\n\t}\n\n\tprivate E head() {\n\t\tfinal E e = store[head];\n\t\tstore[head] = null;\n\t\thead = next(head);\n\t\tsize--;\n\t\treturn e;\n\t}\n\n\tprivate int next(final int x) {\n\t\treturn (x + 1) % store.length;\n\t}\n\n\t/**\n\t * @return true if this buffer has reached its capacity defined during\n\t *         instantiation.\n\t */\n\tprivate boolean isFull() {\n\t\treturn size == this.store.length;\n\t}\n\n\t/**\n\t * @return true iff this buffer contains no elements E.\n\t */\n\tprivate boolean isEmpty() {\n\t\treturn size == 0;\n\t}\n}\n",
+            "positive_examples": [{"tla_element": "buffer", "java_element": "E[] store;"},
+                                  {"tla_element": "buffer = <<>>", "java_element": "this.store = (E[]) new Object[capacity];"},
+                                  {"tla_element": "buffer' = Append(buffer, d)", "java_element": "store[tail] = e;tail = next(tail);size++;"},  
+                                  {"tla_element": "buffer' = Tail(buffer) ", "java_element": "E e = store[head];store[head] = null;head = next(head);size--;"},
+                                  {"tla_element": "waitSet", "java_element": "Condition waitC;"},
+                                  {"tla_element": "waitSet = {}", "java_element": "this.waitC = lock.newCondition();"},
+                                  {"tla_element": "waitSet", "java_element": "Condition waitP;"},
+                                  {"tla_element": "waitSet", "java_element": "this.waitP = lock.newCondition();"},
+                                  {"tla_element": "waitSet' = waitSet \\cup {t}", "java_element": "waitP.await();"},
+                                  {"tla_element": "waitSet' = waitSet \\cup {t}", "java_element": "waitC.await();"}],
+            "negative_examples": [
+                                  {"tla_element": "waitSet", "java_element": "int head;"},
+                                  {"tla_element": "waitSet", "java_element": "int tail;"},
+                                  {"tla_element": "waitSet", "java_element": "E[] store;"},
+                                  {"tla_element": "buffer", "java_element": "Condition waitC;"},
+                                  {"tla_element": "buffer = <<>>", "java_element": "this.waitP = lock.newCondition();"},
+                                  {"tla_element": "buffer = <<>>", "java_element": "this.waitC = lock.newCondition();"},
+                                  {"tla_element": "buffer", "java_element": "Condition waitP;"}]
+        },
+        {
+            "name": "simple_2",
+            "tla_code": "\n--------------------------- MODULE BlockingQueue ---------------------------\nEXTENDS Naturals, Sequences, FiniteSets\n\nCONSTANTS Producers,Consumers,BufCapacity\n\nVARIABLES buffer, waitSet\nvars == <<buffer, waitSet>>\n\n(* Initially, the buffer is empty and no thread is waiting. *)\nInit == /\\ buffer = <<>>\n        /\\ waitSet = {}\n\nRunningThreads == (Producers \\cup Consumers) \\ waitSet\n\nNotifyOther(Others) == \n    IF waitSet \\cap Others # {}\n    THEN \\E t \\in waitSet \\cap Others : waitSet' = waitSet \\ {t}\n    ELSE UNCHANGED waitSet\n\n(* @see java.lang.Object#wait *)\nWait(t) == /\\ waitSet' = waitSet \\cup {t}\n           /\\ UNCHANGED <<buffer>>\n           \nPut(t, v) ==\n/\\ t \notin waitSet\n/\\ \\/ /\\ Len(buffer) < BufCapacity\n      /\\ buffer' = Append(buffer, v)\n      /\\ NotifyOther(Consumers)\n   \\/ /\\ Len(buffer) = BufCapacity\n      /\\ Wait(t)\n      \nGet(t) ==\n/\\ t \notin waitSet\n/\\ \\/ /\\ buffer # <<>>\n      /\\ buffer' = Tail(buffer)\n      /\\ NotifyOther(Producers)\n   \\/ /\\ buffer = <<>>\n      /\\ Wait(t)\n\nNext == \\/ \\E p \\in Producers: Put(p, p) \\* Add some data to buffer\n        \\/ \\E c \\in Consumers: Get(c)\n\nMySeq(P) == UNION {[1..n -> P] : n \\in 0..BufCapacity}\n\nSpec == Init /\\ [][Next]_vars\n\nPutEnabled == \\A p \\in Producers : ENABLED Put(p, p)\n\nStarvation ==\n    /\\ \\A p \\in Producers: []<>(<<Put(p, p)>>_vars)\n    /\\ \\A c \\in Consumers: []<>(<<Get(c)>>_vars)\n\n=============================================================================\n    ",
+            "java_code": "import java.util.LinkedList; import java.util.Queue; public class BlockingQueue<T> { private final Queue<T> buffer; private final int capacity; private final Object lock = new Object(); public BlockingQueue(int capacity) { this.capacity = capacity; this.buffer = new LinkedList<>(); } public void put(T value) throws InterruptedException { synchronized (lock) { while (buffer.size() >= capacity) { lock.wait(); } buffer.add(value); lock.notifyAll(); } } public T get() throws InterruptedException { synchronized (lock) { while (buffer.isEmpty()) { lock.wait(); } T value = buffer.poll(); lock.notifyAll(); return value; } } }",
+            "positive_examples": [{"tla_element": "buffer", "java_element": "Queue<T> buffer;"},
+                                  {"tla_element": "buffer = <<>>", "java_element": "this.buffer = new LinkedList<>();"},
+                                  {"tla_element": "buffer' = Append(buffer, v)", "java_element": "buffer.add(value);"},  
+                                  {"tla_element": "buffer' = Tail(buffer) ", "java_element": "T value = buffer.poll();"},
+                                  {"tla_element": "waitSet = {}", "java_element": "Object lock = new Object();"},
+                                  {"tla_element": "waitSet", "java_element": "Object lock;"},
+                                  {"tla_element": "waitSet' = waitSet \\cup {t}", "java_element": "lock.wait();"}],
+            "negative_examples": [
+                                  {"tla_element": "buffer = <<>>", "java_element": "Object lock = new Object();"},
+                                  {"tla_element": "waitSet", "java_element": "Queue<T> buffer"}]
+        },
+        
+        {
+            "name":"simple_3",
+            "tla_code": "\n--------------------------- MODULE BlockingQueue ---------------------------\nEXTENDS Naturals, Sequences, FiniteSets\n\nCONSTANTS maxCapacity\n\nVARIABLES cache, waitSet\nvars == <<cache, waitSet>>\n\n(* Initially, the cache is empty and no thread is waiting. *)\nInit == /\\ cache = <<>>\n        /\\ waitSet = {}============================================================================= ",
+            "java_code": "\npublic final class BlockingQueue<K> {\n\n\tprivate final K[] store;\n\t\n\tprivate final ReentrantLock lock;\n\tprivate final Condition waitConsumer;\n\tprivate final Condition waitProducer;\n\t\n\tpublic BlockingQueue(final int bufferSize) {\n\t\tthis.store = (K[]) new Object[bufferSize];\n\t\t\n\t\t// see BlockingQueueSplit.tla\n\t\tthis.lock = new ReentrantLock();\n\t\tthis.waitConsumer = lock.newCondition();\n\t\tthis.waitProducer = lock.newCondition();\n\t} ",
+            "positive_examples": [{"tla_element": "cache", "java_element": "K[] store;"},
+                                  {"tla_element": "cache = <<>>", "java_element": "this.store = (K[]) new Object[bufferSize];"},
+                                  {"tla_element": "waitSet = {}", "java_element": "this.waitConsumer = lock.newCondition();"},
+                                  {"tla_element": "waitSet = {}", "java_element": "this.waitProducer = lock.newCondition();"},
+                                  {"tla_element": "waitSet", "java_element": "Condition waitConsumer;"},
+                                  {"tla_element": "waitSet", "java_element": "Condition waitProducer;"}],
+            "negative_examples": [
+                                  {"tla_element": "waitSet", "java_element": "K[] store;"},
+                                  {"tla_element": "cache = <<>>", "java_element": "this.waitConsumer = lock.newCondition();"},
+                                  {"tla_element": "cache = <<>>", "java_element": "this.waitProducer = lock.newCondition();"},
+                                  {"tla_element": "cache", "java_element": "Condition waitConsumer;"},
+                                  {"tla_element": "cache", "java_element": "Condition waitProducer;"}]
+        },
+        {
+            "name":"simple_4",
+            "tla_code": "\n--------------------------- MODULE BlockingQueue ---------------------------\nEXTENDS Naturals, Sequences, FiniteSets\n\nVARIABLES queue, taskSet\nvars == <<queue, taskSet>>\n\n(* Initially, the queue is empty and no thread is waiting. *)\nInit == /\\ queue = <<>>\n        /\\ taskSet = {}\n\n=============================================================================\n    ",
+            "java_code": "\npublic final class BlockingQueue<E> {\n\n\tprivate final E[] storage;\n\t\n\tprivate final ReentrantLock syncLock;\n\tprivate final Condition consumerSet;\n\tprivate final Condition waitP;\n\t\n\tprivate int queueHead;\n\tprivate int queueTail;\n\tprivate int size;\n\n\t@SuppressWarnings(\"unchecked\")\n\tpublic BlockingQueue(final int capacity) {\n\t\tthis.storage = (E[]) new Object[capacity];\n\t\t\n\t\t// see BlockingQueueSplit.tla\n\t\tthis.syncLock = new ReentrantLock();\n\t\tthis.consumerSet = syncLock.newCondition();\n\t\tthis.waitP = syncLock.newCondition();\n\t}\n\n\t/**\n\t * Add the given element to this queue waiting if necessary for space to become\n\t * available.\n\t * \n\t * @see {@link BlockingQueue#take()}.\n\t }",
+            "positive_examples": [{"tla_element": "queue", "java_element": "E[] storage;"},
+                                  {"tla_element": "queue = <<>>", "java_element": "this.storage = (E[]) new Object[capacity];"},
+                                  {"tla_element": "taskSet", "java_element": "Condition consumerSet;"},
+                                  {"tla_element": "taskSet", "java_element": "Condition waitP;"},
+
+                                 
+                                  {"tla_element": "taskSet = {}", "java_element": "this.waitP = lock.newCondition();"},
+                                  {"tla_element": "taskSet = {}", "java_element": "this.consumerSet = lock.newCondition();"}],
+
+            "negative_examples": [{"tla_element": "taskSet", "java_element": "int queueHead;"},
+                                  {"tla_element": "taskSet", "java_element": "int queueTail;"},
+                                  {"tla_element": "taskSet", "java_element": "E[] storage;"},
+                                  {"tla_element": "queue = <<>>", "java_element": "this.consumerSet = lock.newCondition();"},
+                                  {"tla_element": "queue = <<>>", "java_element": "this.waitP = lock.newCondition();"},
+                                  {"tla_element": "queue", "java_element": "Condition consumerSet;"},
+                                  {"tla_element": "queue", "java_element": "Condition waitP;"}]
+        },
+        
+        {
+            "name":"simple_5",
+            "tla_code": "\n--------------------------- MODULE BlockingQueue ---------------------------\nEXTENDS Naturals, Sequences, FiniteSets\n\nCONSTANTS Producers,Consumers,QueueCapacity\n\nVARIABLES queue, taskSet\nvars == <<queue, taskSet>>\n\n(* Initially, the queue is empty and no thread is waiting. *)\nInit == /\\ queue = <<>>\n        /\\ taskSet = {}\n\nRunningThreads == (Producers \\cup Consumers) \\ taskSet\n\nNotifyOther(Others) == \n    IF taskSet \\cap Others # {}\n    THEN \\E t \\in taskSet \\cap Others : taskSet' = taskSet \\ {t}\n    ELSE UNCHANGED taskSet\n\n(* @see java.lang.Object#wait *)\nWait(t) == /\\ taskSet' = taskSet \\cup {t}\n           /\\ UNCHANGED <<queue>>\n           \nEnqueue(t, d) ==\n/\\ t \notin taskSet\n/\\ \\/ /\\ Len(queue) < QueueCapacity\n      /\\ queue' = Append(queue, d)\n      /\\ NotifyOther(Consumers)\n   \\/ /\\ Len(queue) = QueueCapacity\n      /\\ Wait(t)\n      \nDequeue(t) ==\n/\\ t \notin taskSet\n/\\ \\/ /\\ queue # <<>>\n      /\\ queue' = Tail(queue)\n      /\\ NotifyOther(Producers)\n   \\/ /\\ queue = <<>>\n      /\\ Wait(t)\n\nNext == \\/ \\E p \\in Producers: Dequeue(p, p) \\* Add some data to queue\n        \\/ \\E c \\in Consumers: Enqueue(c)\n\nMySeq(P) == UNION {[1..n -> P] : n \\in 0..QueueCapacity}\n\nSpec == Init /\\ [][Next]_vars\n\nDequeueEnabled == \\A p \\in Producers : ENABLED Dequeue(p, p)\n\nStarvation ==\n    /\\ \\A p \\in Producers: []<>(<<Dequeue(p, p)>>_vars)\n    /\\ \\A c \\in Consumers: []<>(<<Enqueue(c)>>_vars)\n\n=============================================================================\n    ",
+            "java_code": "\npublic final class BlockingQueue<E> {\n\n\tprivate final E[] storage;\n\t\n\tprivate final ReentrantLock mutex;\n\tprivate final Condition consumerSet;\n\tprivate final Condition waitP;\n\t\n\tprivate int queueHead;\n\tprivate int endIndex;\n\tprivate int size;\n\n\t@SuppressWarnings(\"unchecked\")\n\tpublic BlockingQueue(final int queueSize) {\n\t\tthis.storage = (E[]) new Object[queueSize];\n\t\t\n\t\t// see BlockingQueueSplit.tla\n\t\tthis.mutex = new ReentrantLock();\n\t\tthis.consumerSet = mutex.newCondition();\n\t\tthis.waitP = mutex.newCondition();\n\t}\n\n\t/**\n\t * Add the given element to this queue waiting if necessary for space to become\n\t * available.\n\t * \n\t * @see {@link BlockingQueue#take()}.\n\t */\n\tpublic void put(final E e) throws InterruptedException {\n\t\tfinal ReentrantLock mutex = this.mutex;\n\t\tmutex.lock();\n\t\ttry {\n\t\t\twhile (isFull()) {\n\t\t\t\tnew BufferWaitEvent(\"p\").commit();\n\t\t\t\tSystem.out.println(\"Buffer full; P waits\");\n\t\t\t\twaitP.await();\n\t\t\t\tSystem.out.println(\"P notified\");\n\t\t\t}\n\t\t\tconsumerSet.signal();\n\n\t\t\t// Add e and do bookkeeping.\n\t\t\tnew BufferEnqEvent().commit();\n\t\t\tappend(e);\n\t\t} finally {\n\t\t\tmutex.unlock();\n\t\t}\n\t}\n\n\t/**\n\t * Remove an element E from this queue, waiting if necessary until an element\n\t * becomes available.\n\t * \n\t * @see {@link BlockingQueue#put(Object)}.\n\t */\n\tpublic E take() throws InterruptedException {\n        final ReentrantLock mutex = this.mutex;\n        mutex.lock();\n        try {\n    \t\twhile (isEmpty()) {\n    \t\t\tnew BufferWaitEvent(\"c\").commit();\n    \t\t\tSystem.out.println(\"Buffer empty; C waits\");\n    \t\t\tconsumerSet.await();\n    \t\t\tSystem.out.println(\"C notified\");\n    \t\t}\n    \t\twaitP.signal();\n    \t\t\n    \t\t// Remove e and do bookkeeping.\n    \t\tnew BufferDeqEvent().commit();\n    \t\treturn head();\n        } finally {\n            mutex.unlock();\n        }\n\t}\n\t\n\t\n\t//****** auxiliary methods ******//\n\n\tprivate void append(final E e) {\n\t\tstorage[endIndex] = e;\n\t\tendIndex = next(endIndex);\n\t\tsize++;\n\t}\n\n\tprivate E head() {\n\t\tfinal E e = storage[queueHead];\n\t\tstorage[queueHead] = null;\n\t\tqueueHead = next(queueHead);\n\t\tsize--;\n\t\treturn e;\n\t}\n\n\tprivate int next(final int x) {\n\t\treturn (x + 1) % storage.length;\n\t}\n\n\t/**\n\t * @return true if this buffer has reached its capacity defined during\n\t *         instantiation.\n\t */\n\tprivate boolean isFull() {\n\t\treturn size == this.storage.length;\n\t}\n\n\t/**\n\t * @return true iff this buffer contains no elements E.\n\t */\n\tprivate boolean isEmpty() {\n\t\treturn size == 0;\n\t}\n}\n",
+            "positive_examples": [{"tla_element": "queue", "java_element": "E[] storage;"},
+                                  {"tla_element": "queue = <<>>", "java_element": "this.storage = (E[]) new Object[queueSize];"},
+
+                                  {"tla_element": "queue' = Append(queue, d)", "java_element": "storage[endIndex] = e;endIndex = next(endIndex);size++;"},  
+                                  {"tla_element": "queue' = Tail(queue) ", "java_element": "E e = storage[queueHead];storage[queueHead] = null;queueHead = next(queueHead);size--;"},
+                                  {"tla_element": "taskSet = {}", "java_element": "this.consumerSet = lock.newCondition();"},
+                                  {"tla_element": "taskSet = {}", "java_element": "this.waitP = lock.newCondition();"},            
+                                  {"tla_element": "taskSet", "java_element": "Condition consumerSet;"},
+                                  {"tla_element": "taskSet", "java_element": "Condition waitP;"}],
+            "negative_examples": [
+                                  {"tla_element": "taskSet", "java_element": "int endIndex;"}, 
+                                  {"tla_element": "taskSet", "java_element": "int queueHead;"},                                
+                                  {"tla_element": "taskSet", "java_element": "E[] storage;"},
+                                  {"tla_element": "queue = <<>>", "java_element": "this.consumerSet = lock.newCondition();"},
+                                  {"tla_element": "queue = <<>>", "java_element": "this.waitP = lock.newCondition();"},
+                                  {"tla_element": "queue", "java_element": "Condition consumerSet;"},
+                                  {"tla_element": "queue", "java_element": "Condition waitP;"}]
+        },
+        
+        {
+            "name": "simple_6",
+            "tla_code": "---------------------------- MODULE Counter ---------------------------- EXTENDS Naturals \n VARIABLES counter\n Init == counter = 0\n Next == counter' = counter + 1\n Spec == Init /\\ [][Next]_counter =============================================================================",
+            "java_code": "public class Counter { private int counter; public Counter() { this.counter = 0; } public void increment() { this.counter += 1; } public int getCounter() { return this.counter; } }",
+            "positive_examples": [{"tla_element": "counter", "java_element": "int counter;"},
+                                  {"tla_element": "Next == counter' = counter + 1", "java_element": "this.counter += 1;"},
+                                  {"tla_element": "Init == counter = 0", "java_element": "this.counter = 0;"}],
+            "negative_examples": [{"tla_element": "counter", "java_element": "public Counter()"}]
+        },
+        {
+            "name": "simple_7",
+            "tla_code": "---------------------------- MODULE Accumulator ---------------------------- EXTENDS Naturals \n VARIABLES accumulator\n Init == accumulator = 0\n Next == accumulator' = accumulator + 1 Spec == Init /\\ [][Next]accumulator =============================================================================",
+            "java_code": "public class Accumulator { private int accumulator; public Accumulator() { this.accumulator = 0; } public void increment() { this.accumulator += 1; } public int getAccumulator() { return this.accumulator; } }",
+            "positive_examples": [{"tla_element": "accumulator", "java_element": "int accumulator;"},
+                                  {"tla_element": "Init == accumulator = 0", "java_element": "this.accumulator = 0;"}],
+            "negative_examples": [{"tla_element": "accumulator", "java_element": "public Accumulator()"}]
+        },
+        
+        {
+            "name": "simple_8",
+            "tla_code": "---------------------------- MODULE Counter ---------------------------- EXTENDS Naturals \n VARIABLES counter Init == counter = 0 Next == counter' = counter + 1 Spec == Init /\\ [][Next]_counter =============================================================================",
+            "java_code": "public class SynchronizedCounter { private int counter; public SynchronizedCounter() { counter = 0; } public synchronized void increment() { counter = counter + 1; } public synchronized int getValue() { return counter; }  }",
+            "positive_examples": [{"tla_element": "counter", "java_element": "int counter;"},
+                                  {"tla_element": "Next == counter' = counter + 1", "java_element": "counter = counter + 1;"},
+                                  {"tla_element": "Init == counter = 0", "java_element": "counter = 0;"}],
+            "negative_examples": [{"tla_element": "counter", "java_element": "public SynchronizedCounter()"}]
+        },
+       
+        {
+            "name": "simple_9",
+            "tla_code": "---------------------------- MODULE Counter ---------------------------- EXTENDS Naturals \n VARIABLES counter Init == counter = 0 Next == counter' = counter + 1 Spec == Init /\\ [][Next]_counter =============================================================================",
+            "java_code": "public class AtomicCounter { private AtomicInteger counter; public AtomicCounter() { counter = new AtomicInteger(0); } public void increment() { counter.incrementAndGet(); } public int getValue() { return counter.get(); } }",
+            "positive_examples": [{"tla_element": "counter", "java_element": "AtomicInteger counter;"},
+                                  {"tla_element": "Next == counter' = counter + 1", "java_element": "counter.incrementAndGet();"},
+                                  {"tla_element": "Init == counter = 0", "java_element": "counter = new AtomicInteger(0);"}],
+            "negative_examples": [{"tla_element": "counter", "java_element": "public AtomicCounter()"}]
+        },
+        
+        {
+            "name": "simple_10",
+            "tla_code": "---------------------------- MODULE Simple ---------------------------- EXTENDS Naturals \n VARIABLES x, y, pc \n vars == << x, y, pc >> ProcSet == (0..N-1) Init == /\\ x = [i \\in 0..(N-1) |-> 0] /\\ y = [i \\in 0..(N-1) |-> 0] /\\ pc = [self \\in ProcSet |-> \"a\"] a(self) == /\\ pc[self] = \"a\" /\\ x' = [x EXCEPT ![self] = 1] /\\ pc' = [pc EXCEPT ![self] = \"b\"] /\\ y' = y b(self) == /\\ pc[self] = \"b\" /\\ y' = [y EXCEPT ![self] = x[(self-1) % N]] /\\ pc' = [pc EXCEPT ![self] = \"Done\"] /\\ x' = x proc(self) == a(self) \\/ b(self) Terminating == /\\ \\A self \\in ProcSet: pc[self] = \"Done\" /\\ UNCHANGED vars Next == (\\E self \\in 0..N-1: proc(self)) \\/ Terminating Spec == Init /\\ [][Next]_vars =============================================================================",
+            "java_code": "public class Simple { private int[] x; private int[] y; private String[] pc; private final int N; private final ReentrantLock lock = new ReentrantLock(); public CounterSystem(int N) { this.N = N; this.x = new int[N]; this.y = new int[N]; this.pc = new String[N]; Arrays.fill(pc, \"a\"); } private void a(int self) { lock.lock(); try { if (\"a\".equals(pc[self])) { x[self] = 1; pc[self] = \"b\"; } } finally { lock.unlock(); } } private void b(int self) { lock.lock(); try { if (\"b\".equals(pc[self])) { y[self] = x[(self - 1 + N) % N]; pc[self] = \"Done\"; } } finally { lock.unlock(); } } public void proc(int self) { if (\"a\".equals(pc[self])) { a(self); } else if (\"b\".equals(pc[self])) { b(self); } } public boolean isTerminating() { lock.lock(); try { for (String state : pc) { if (!\"Done\".equals(state)) { return false; } } return true; } finally { lock.unlock(); } } public void run() { while (!isTerminating()) { for (int self = 0; self < N; self++) { proc(self); } } }   }",
+            "positive_examples": [{"tla_element": "x", "java_element": "int[] x;"},
+                                  {"tla_element": "Init == x = [i \\in 0..(N-1) |-> 0]", "java_element": "this.x = new int[N];"},
+                                  {"tla_element": "x' = [x EXCEPT ![self] = 1]", "java_element": "x[self] = 1;"},
+                                  {"tla_element": "y", "java_element": "int[] y;"},
+                                  {"tla_element": "y' = [y EXCEPT ![self] = x[(self-1) % N]]", "java_element": "y[self] = x[(self - 1 + N) % N];"},
+                                  {"tla_element": "pc", "java_element": "String[] pc"},
+                                  {"tla_element": "pc' = [pc EXCEPT ![self] = \"Done\"]", "java_element": "pc[self] = \"Done\";"}
+        ],
+            "negative_examples": [{"tla_element": "x", "java_element": "int[] y;"},
+                                  {"tla_element": "x", "java_element": "String[] pc;"},
+                                  {"tla_element": "y", "java_element": "String[] pc;"}]
+        },
+        {
+            "name": "simple_11",
+            "tla_code": "---------------------------- MODULE Simple ---------------------------- EXTENDS Naturals \n VARIABLES x, y, pc \n vars == << x, y, pc >> ProcSet == (0..N-1) Init == /\\ x = [i \\in 0..(N-1) |-> 0] /\\ y = [i \\in 0..(N-1) |-> 0] /\\ pc = [self \\in ProcSet |-> \"a\"] a(self) == /\\ pc[self] = \"a\" /\\ x' = [x EXCEPT ![self] = 1] /\\ pc' = [pc EXCEPT ![self] = \"b\"] /\\ y' = y b(self) == /\\ pc[self] = \"b\" /\\ y' = [y EXCEPT ![self] = x[(self-1) % N]] /\\ pc' = [pc EXCEPT ![self] = \"Done\"] /\\ x' = x proc(self) == a(self) \\/ b(self) Terminating == /\\ \\A self \\in ProcSet: pc[self] = \"Done\" /\\ UNCHANGED vars Next == (\\E self \\in 0..N-1: proc(self)) \\/ Terminating Spec == Init /\\ [][Next]_vars =============================================================================",
+            "java_code": "public class Simple { private int[] valueA; private int[] valueB; private String[] processes; private final int N; private final ReentrantLock lock = new ReentrantLock(); public Simple(int N) { this.N = N; this.valueA = new int[N]; this.valueB = new int[N]; this.processes = new String[N]; Arrays.fill(processes, \"a\"); } private void a(int self) { lock.lock(); try { if (\"a\".equals(processes[self])) { valueA[self] = 1; processes[self] = \"b\"; } } finally { lock.unlock(); } } private void b(int self) { lock.lock(); try { if (\"b\".equals(processes[self])) { valueB[self] = valueA[(self - 1 + N) % N]; processes[self] = \"Done\"; } } finally { lock.unlock(); } } public void proc(int self) { if (\"a\".equals(processes[self])) { a(self); } else if (\"b\".equals(processes[self])) { b(self); } } public boolean isTerminating() { lock.lock(); try { for (String state : processes) { if (!\"Done\".equals(state)) { return false; } } return true; } finally { lock.unlock(); } } public void run() { while (!isTerminating()) { for (int self = 0; self < N; self++) { proc(self); } } } }",
+            "positive_examples": [{"tla_element": "x", "java_element": "int[] valueA;"},
+                                  {"tla_element": "Init == x = [i \\in 0..(N-1) |-> 0]", "java_element": "this.valueA = new int[N];"},
+                                  {"tla_element": "y", "java_element": "int[] valueB;"},
+                                  {"tla_element": "pc", "java_element": "String[] processes;"}
+        ],
+            "negative_examples": [{"tla_element": "x", "java_element": "int[] valueB;"},
+                                  {"tla_element": "x", "java_element": "String[] processes;"},
+                                  {"tla_element": "y", "java_element": "String[] processes;"}]
+        },
+        
+       
+        {
+            "name": "simple_12",
+            "tla_code": "---- MODULE TrafficLight ---- EXTENDS TLC VARIABLES light Init == light = \"Green\" Next == \\/ /\\ light = \"Green\" /\\ light' = \"Yellow\" \\/ /\\ light = \"Yellow\" /\\ light' = \"Red\" \\/ /\\ light = \"Red\" /\\ light' = \"Green\" Spec == Init /\\ [][Next]_light =================================",
+            "java_code": "public class TrafficLight { private enum State { RED, GREEN, YELLOW } private State currentState; public TrafficLight() { this.currentState = State.RED; } public void nextState() { switch (currentState) { case RED: currentState = State.GREEN; break; case GREEN: currentState = State.YELLOW; break; case YELLOW: currentState = State.RED; break; } } public String getCurrentState() { return currentState.toString(); } }",
+            "positive_examples": [{"tla_element": "light", "java_element": "State currentState;"},
+                                  {"tla_element": "Init == light = \"Green\"", "java_element": "this.currentState = State.RED;"},
+                                  {"tla_element": "light' = \"Yellow\"", "java_element": "case GREEN: currentState = State.YELLOW;"},
+                                  {"tla_element": "light' = \"Red\"", "java_element": "case YELLOW: currentState = State.RED;"}],
+            "negative_examples": [{"tla_element": "light", "java_element": "public TrafficLight()"}]
+        },
+        {
+            "name": "simple_13",
+            "tla_code": "---- MODULE TrafficLight ---- EXTENDS TLC VARIABLES light Init == light = \"Green\" Next == \\/ /\\ light = \"Green\" /\\ light' = \"Yellow\" \\/ /\\ light = \"Yellow\" /\\ light' = \"Red\" \\/ /\\ light = \"Red\" /\\ light' = \"Green\" Spec == Init /\\ [][Next]_light =================================",
+            "java_code": "public class Counter { private int counter; public Counter() { this.counter = 0; } public void increment() { this.counter += 1; } public int getCounter() { return this.counter; } }",
+            "positive_examples": [],
+            "negative_examples": [{"tla_element": "light", "java_element": "int counter;"},
+                                  {"tla_element": "Init == light = \"Green\"", "java_element": "this.counter = 0;"},
+                                  {"tla_element": "light' = \"Red\"", "java_element": "this.counter += 1;"}
+        
+            ]
+        },
+        {
+            "name": "simple_14",
+            "tla_code": "---------------------------- MODULE Simple ---------------------------- EXTENDS Naturals \n VARIABLES x, y, pc \n vars == << x, y, pc >> ProcSet == (0..N-1) Init == /\\ x = [i \\in 0..(N-1) |-> 0] /\\ y = [i \\in 0..(N-1) |-> 0] /\\ pc = [self \\in ProcSet |-> \"a\"] a(self) == /\\ pc[self] = \"a\" /\\ x' = [x EXCEPT ![self] = 1] /\\ pc' = [pc EXCEPT ![self] = \"b\"] /\\ y' = y b(self) == /\\ pc[self] = \"b\" /\\ y' = [y EXCEPT ![self] = x[(self-1) % N]] /\\ pc' = [pc EXCEPT ![self] = \"Done\"] /\\ x' = x proc(self) == a(self) \\/ b(self) Terminating == /\\ \\A self \\in ProcSet: pc[self] = \"Done\" /\\ UNCHANGED vars Next == (\\E self \\in 0..N-1: proc(self)) \\/ Terminating Spec == Init /\\ [][Next]_vars =============================================================================",
+            "java_code": "\npublic final class BlockingQueue<E> {\n\n\tprivate final E[] storage;\n\t\n\tprivate final ReentrantLock mutex;\n\tprivate final Condition consumerSet;\n\tprivate final Condition waitP;\n\t\n\tprivate int queueHead;\n\tprivate int endIndex;\n\tprivate int size;\n\n\t@SuppressWarnings(\"unchecked\")\n\tpublic BlockingQueue(final int queueSize) {\n\t\tthis.storage = (E[]) new Object[queueSize];\n\t\t\n\t\t// see BlockingQueueSplit.tla\n\t\tthis.mutex = new ReentrantLock();\n\t\tthis.consumerSet = mutex.newCondition();\n\t\tthis.waitP = mutex.newCondition();\n\t}\n\n\t/**\n\t * Add the given element to this queue waiting if necessary for space to become\n\t * available.\n\t * \n\t * @see {@link BlockingQueue#take()}.\n\t */\n\tpublic void put(final E e) throws InterruptedException {\n\t\tfinal ReentrantLock mutex = this.mutex;\n\t\tmutex.lock();\n\t\ttry {\n\t\t\twhile (isFull()) {\n\t\t\t\tnew BufferWaitEvent(\"p\").commit();\n\t\t\t\tSystem.out.println(\"Buffer full; P waits\");\n\t\t\t\twaitP.await();\n\t\t\t\tSystem.out.println(\"P notified\");\n\t\t\t}\n\t\t\tconsumerSet.signal();\n\n\t\t\t// Add e and do bookkeeping.\n\t\t\tnew BufferEnqEvent().commit();\n\t\t\tappend(e);\n\t\t} finally {\n\t\t\tmutex.unlock();\n\t\t}\n\t}\n\n\t/**\n\t * Remove an element E from this queue, waiting if necessary until an element\n\t * becomes available.\n\t * \n\t * @see {@link BlockingQueue#put(Object)}.\n\t */\n\tpublic E take() throws InterruptedException {\n        final ReentrantLock mutex = this.mutex;\n        mutex.lock();\n        try {\n    \t\twhile (isEmpty()) {\n    \t\t\tnew BufferWaitEvent(\"c\").commit();\n    \t\t\tSystem.out.println(\"Buffer empty; C waits\");\n    \t\t\tconsumerSet.await();\n    \t\t\tSystem.out.println(\"C notified\");\n    \t\t}\n    \t\twaitP.signal();\n    \t\t\n    \t\t// Remove e and do bookkeeping.\n    \t\tnew BufferDeqEvent().commit();\n    \t\treturn head();\n        } finally {\n            mutex.unlock();\n        }\n\t}\n\t\n\t\n\t//****** auxiliary methods ******//\n\n\tprivate void append(final E e) {\n\t\tstorage[endIndex] = e;\n\t\tendIndex = next(endIndex);\n\t\tsize++;\n\t}\n\n\tprivate E head() {\n\t\tfinal E e = storage[queueHead];\n\t\tstorage[queueHead] = null;\n\t\tqueueHead = next(queueHead);\n\t\tsize--;\n\t\treturn e;\n\t}\n\n\tprivate int next(final int x) {\n\t\treturn (x + 1) % storage.length;\n\t}\n\n\t/**\n\t * @return true if this buffer has reached its capacity defined during\n\t *         instantiation.\n\t */\n\tprivate boolean isFull() {\n\t\treturn size == this.storage.length;\n\t}\n\n\t/**\n\t * @return true iff this buffer contains no elements E.\n\t */\n\tprivate boolean isEmpty() {\n\t\treturn size == 0;\n\t}\n}\n",
+            "positive_examples": [],
+            "negative_examples": [{"tla_element": "x", "java_element": "E[] storage;"},
+                                  {"tla_element": "x", "java_element": "ReentrantLock mutex;"},
+                                  {"tla_element": "x", "java_element": "Condition consumerSet;"},
+                                  {"tla_element": "x", "java_element": "Condition waitP;"},
+
+                                  {"tla_element": "y", "java_element": "E[] storage;"},
+                                  {"tla_element": "y", "java_element": "ReentrantLock mutex;"},
+                                  {"tla_element": "y", "java_element": "Condition consumerSet;"},
+                                  {"tla_element": "y", "java_element": "Condition waitP;"},
+
+                                  {"tla_element": "pc", "java_element": "E[] storage;"},
+                                  {"tla_element": "pc", "java_element": "ReentrantLock mutex;"},
+                                  {"tla_element": "pc", "java_element": "Condition consumerSet;"},
+                                  {"tla_element": "pc", "java_element": "Condition waitP;"}
+        
+            ]
+        },
+
+        {
+            "name": "simple_15",
+            "tla_code": "---- MODULE TrafficLight ---- EXTENDS TLC VARIABLES light Init == light = \"Green\" Next == \\/ /\\ light = \"Green\" /\\ light' = \"Yellow\" \\/ /\\ light = \"Yellow\" /\\ light' = \"Red\" \\/ /\\ light = \"Red\" /\\ light' = \"Green\" Spec == Init /\\ [][Next]_light =================================",
+            "java_code": "\npublic final class BlockingQueue<E> {\n\n\tprivate final E[] store;\n\t\n\tprivate final ReentrantLock lock;\n\tprivate final Condition waitC;\n\tprivate final Condition waitP;\n\t\n\tprivate int head;\n\tprivate int tail;\n\tprivate int size;\n\n\t@SuppressWarnings(\"unchecked\")\n\tpublic BlockingQueue(final int capacity) {\n\t\tthis.store = (E[]) new Object[capacity];\n\t\t\n\t\t// see BlockingQueueSplit.tla\n\t\tthis.lock = new ReentrantLock();\n\t\tthis.waitC = lock.newCondition();\n\t\tthis.waitP = lock.newCondition();\n\t}\n\n\t/**\n\t * Add the given element to this queue waiting if necessary for space to become\n\t * available.\n\t * \n\t * @see {@link BlockingQueue#take()}.\n\t */\n\tpublic void put(final E e) throws InterruptedException {\n\t\tfinal ReentrantLock lock = this.lock;\n\t\tlock.lock();\n\t\ttry {\n\t\t\twhile (isFull()) {\n\t\t\t\tnew BufferWaitEvent(\"p\").commit();\n\t\t\t\tSystem.out.println(\"Buffer full; P waits\");\n\t\t\t\twaitP.await();\n\t\t\t\tSystem.out.println(\"P notified\");\n\t\t\t}\n\t\t\twaitC.signal();\n\n\t\t\t// Add e and do bookkeeping.\n\t\t\tnew BufferEnqEvent().commit();\n\t\t\tappend(e);\n\t\t} finally {\n\t\t\tlock.unlock();\n\t\t}\n\t}\n\n\t/**\n\t * Remove an element E from this queue, waiting if necessary until an element\n\t * becomes available.\n\t * \n\t * @see {@link BlockingQueue#put(Object)}.\n\t */\n\tpublic E take() throws InterruptedException {\n        final ReentrantLock lock = this.lock;\n        lock.lock();\n        try {\n    \t\twhile (isEmpty()) {\n    \t\t\tnew BufferWaitEvent(\"c\").commit();\n    \t\t\tSystem.out.println(\"Buffer empty; C waits\");\n    \t\t\twaitC.await();\n    \t\t\tSystem.out.println(\"C notified\");\n    \t\t}\n    \t\twaitP.signal();\n    \t\t\n    \t\t// Remove e and do bookkeeping.\n    \t\tnew BufferDeqEvent().commit();\n    \t\treturn head();\n        } finally {\n            lock.unlock();\n        }\n\t}\n\t\n\t\n\t//****** auxiliary methods ******//\n\n\tprivate void append(final E e) {\n\t\tstore[tail] = e;\n\t\ttail = next(tail);\n\t\tsize++;\n\t}\n\n\tprivate E head() {\n\t\tfinal E e = store[head];\n\t\tstore[head] = null;\n\t\thead = next(head);\n\t\tsize--;\n\t\treturn e;\n\t}\n\n\tprivate int next(final int x) {\n\t\treturn (x + 1) % store.length;\n\t}\n\n\t/**\n\t * @return true if this buffer has reached its capacity defined during\n\t *         instantiation.\n\t */\n\tprivate boolean isFull() {\n\t\treturn size == this.store.length;\n\t}\n\n\t/**\n\t * @return true iff this buffer contains no elements E.\n\t */\n\tprivate boolean isEmpty() {\n\t\treturn size == 0;\n\t}\n}\n",
+            "positive_examples": [],
+            "negative_examples": [{"tla_element": "light", "java_element": "E[] store;"},
+            {"tla_element": "light", "java_element": "ReentrantLock lock;"},
+            {"tla_element": "light", "java_element": "Condition waitC;"},
+            {"tla_element": "light", "java_element": "Condition waitP;"}
+        
+            ]
+        },
+        {
+            "name": "simple_16",
+            "tla_code": "\n--------------------------- MODULE BlockingQueue ---------------------------\nEXTENDS Naturals, Sequences, FiniteSets\n\nCONSTANTS Producers,Consumers,BufCapacity\n\nVARIABLES buffer, waitSet\nvars == <<buffer, waitSet>>\n\n(* Initially, the buffer is empty and no thread is waiting. *)\nInit == /\\ buffer = <<>>\n        /\\ waitSet = {}\n\nRunningThreads == (Producers \\cup Consumers) \\ waitSet\n\nNotifyOther(Others) == \n    IF waitSet \\cap Others # {}\n    THEN \\E t \\in waitSet \\cap Others : waitSet' = waitSet \\ {t}\n    ELSE UNCHANGED waitSet\n\n(* @see java.lang.Object#wait *)\nWait(t) == /\\ waitSet' = waitSet \\cup {t}\n           /\\ UNCHANGED <<buffer>>\n           \nPut(t, d) ==\n/\\ t \notin waitSet\n/\\ \\/ /\\ Len(buffer) < BufCapacity\n      /\\ buffer' = Append(buffer, d)\n      /\\ NotifyOther(Consumers)\n   \\/ /\\ Len(buffer) = BufCapacity\n      /\\ Wait(t)\n      \nGet(t) ==\n/\\ t \notin waitSet\n/\\ \\/ /\\ buffer # <<>>\n      /\\ buffer' = Tail(buffer)\n      /\\ NotifyOther(Producers)\n   \\/ /\\ buffer = <<>>\n      /\\ Wait(t)\n\nNext == \\/ \\E p \\in Producers: Put(p, p) \\* Add some data to buffer\n        \\/ \\E c \\in Consumers: Get(c)\n\nMySeq(P) == UNION {[1..n -> P] : n \\in 0..BufCapacity}\n\nSpec == Init /\\ [][Next]_vars\n\nPutEnabled == \\A p \\in Producers : ENABLED Put(p, p)\n\nStarvation ==\n    /\\ \\A p \\in Producers: []<>(<<Put(p, p)>>_vars)\n    /\\ \\A c \\in Consumers: []<>(<<Get(c)>>_vars)\n\n=============================================================================\n    ",
+            "java_code": "public class Accumulator { private int accumulator; public Accumulator() { this.accumulator = 0; } public void increment() { this.accumulator += 1; } public int getAccumulator() { return this.accumulator; } }",
+            "positive_examples": [],
+            "negative_examples": [{"tla_element": "buffer", "java_element": "int accumulator;"},
+            {"tla_element": "waitSet", "java_element": "int accumulator;"}
+        
+            ]
+        },
+        {
+            "name": "simple_17",
+            "tla_code": "---- MODULE Calculator ---- EXTENDS Naturals VARIABLES lastResult, lastOperation Init == lastResult = 0 /\\ lastOperation = \"None\" Add(a, b) == /\\ lastResult' = a + b /\\ lastOperation' = \"Addition\" Subtract(a, b) == /\\ lastResult' = a - b /\\ lastOperation' = \"Subtraction\" Multiply(a, b) == /\\ lastResult' = a * b /\\ lastOperation' = \"Multiplication\"  Next == \\/ \\E a, b \\in Nat : Add(a, b) \\/ \\E a, b \\in Nat : Subtract(a, b) \\/ \\E a, b \\in Nat : Multiply(a, b) \n Spec == Init /\\ [][Next]_<<lastResult, lastOperation>> ============================================",
+            "java_code": "public class Calculator { private double lastResult; private String lastOperation; public Calculator() {lastResult = 0.0; lastOperation = \"None\"; } public double add(double a, double b) { lastResult = a + b; lastOperation = \"Addition\"; return lastResult; } public double subtract(double a, double b) { lastResult = a - b; lastOperation = \"Subtraction\"; return lastResult; } public double multiply(double a, double b) { lastResult = a * b; lastOperation = \"Multiplication\"; return",
+            "positive_examples": [{"tla_element": "lastResult", "java_element": "double lastResult;"},
+                                  {"tla_element": "Init == lastResult = 0", "java_element": "lastResult = 0.0;"},
+                                  {"tla_element": "lastResult' = a + b", "java_element": "lastResult = a + b;"},
+                                  {"tla_element": "lastResult' = a - b", "java_element": "lastResult = a - b;"},
+                                  {"tla_element": "lastResult' = a * b", "java_element": "lastResult = a * b;"},
+                                  {"tla_element": "lastOperation", "java_element": "String lastOperation;"},
+                                  {"tla_element": "lastOperation = \"None\"", "java_element": "lastOperation = \"None\";"},
+                                  {"tla_element": "lastOperation' = \"Addition\"", "java_element": "lastOperation = \"Addition\";"}],
+            "negative_examples": [{"tla_element": "lastResult", "java_element": "String lastOperation;"},
+                                  {"tla_element": "Init == lastResult = 0", "java_element": "lastOperation = \"None\";"}]
+        }
+
+
+
+    ]
+}
