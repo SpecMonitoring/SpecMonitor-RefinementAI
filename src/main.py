@@ -20,6 +20,7 @@ RAW_FILE_JAVA = 'data/java_code_corpus.txt'
 MAPPING_DATASET = 'data/mapping_dataset.json'
 MAPPING_DATASET_VALIDATION = 'data/mapping_dataset_validation.json'
 REFINEAIMODEL_PATH = 'model/RefineAI.pth'
+TOKENIZER_PATH = 'model/tokenizer.pkl'
 JAVA_LANGUAGE = Language(tsjava.language())
 TLAPLUS_LANGUAGE = Language(tstlaplus.language())
 
@@ -35,7 +36,7 @@ def check_file_exist(files):
 def load_tokenizer():
 
     try:
-        with open('model/tokenizer.pkl', 'rb') as f:
+        with open(TOKENIZER_PATH, 'rb') as f:
             tokenizer = pickle.load(f)
             return tokenizer
     except FileNotFoundError:
@@ -97,7 +98,7 @@ def load_weights_from_saved_model(model_path, task):
     return model
     
 
-def visualizeSelfAttention():
+def visualize_self_attention():
     
     example_code ="""
 -------------------------- MODULE OpenAddressing --------------------------
@@ -129,7 +130,7 @@ Spec == Init /\ [][Next]_vars
                                       title="Average Attention Weights")
 
 
-def doTrainSelfAttention():
+def do_train_self_attention():
     files = [RAW_FILE_JAVA,RAW_FILE_TLAPLUS]
     check_file_exist(files)
     tokenizer = load_tokenizer()
@@ -152,11 +153,11 @@ def doTrainSelfAttention():
     )
     trainer.train()
     trainer.save_model_state(REFINEAIMODEL_PATH)
-    with open('tokenizer.pkl', 'wb') as f:
+    with open(TOKENIZER_PATH, 'wb') as f:
         pickle.dump(tokenizer, f)
 
 
-def doTrainCrossAttention():
+def do_train_cross_attention():
     files = [REFINEAIMODEL_PATH,MAPPING_DATASET]
     check_file_exist(files)
     tokenizer = load_tokenizer()
@@ -184,10 +185,9 @@ if __name__ == "__main__":
                                                                                             (2) train_cross that commbines uses cosine similarity for alingment. """) 
     args = parser.parse_args()
     if args.task == "train_self": 
-        doTrainSelfAttention() 
+        do_train_self_attention() 
     elif args.task == "train_cross": 
-        doTrainCrossAttention()
-    #visualizeSelfAttention()
+        do_train_cross_attention()
 
 
     
