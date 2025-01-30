@@ -6,6 +6,7 @@ import torch
 import pickle
 import unittest
 from sklearn.metrics import precision_score, recall_score, f1_score
+import config
 
 class Evaluation:
 
@@ -18,22 +19,29 @@ class Evaluation:
 
         #print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}")
         return precision, recall, f1
-    
+
+# The module path used when the tokenizer object was originally saved is not found when re-structured to src/*.
+class CustomUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'ASTCodeTokenizer':
+            module = 'src.ASTCodeTokenizer'
+        return super().find_class(module, name)
 
 class TestTLAPLUS(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        tokenizer_path = config.TOKENIZER_PATH
         try:
-            with open('tokenizer.pkl', 'rb') as f:
-                cls.tokenizer = pickle.load(f)
+            with open(tokenizer_path, 'rb') as f:
+                cls.tokenizer = CustomUnpickler(f).load()
                 cls.tokenizer.parser.language = Language(tstlaplus.language())
         except FileNotFoundError:
-            print("tokenizer state file has not been found.")
+            print("Tokenizer state file has not been found.")
             return
 
         cls.model = RefineAI(cls.tokenizer, vocab_size=len(cls.tokenizer.vocab), num_heads=8,ff_dim = 4 * 256)
-        MODEL_PATH = 'RefineAI.pth'
-        state = torch.load(MODEL_PATH)  
+        mode_path = config.REFINEAIMODEL_PATH
+        state = torch.load(mode_path)  
         cls.model.load_state_dict(state['model_state_dict'], strict=False)
         cls.model.eval()
         cls.language = 'TLA'         
@@ -622,17 +630,18 @@ Wait(t) == /\ waitSet' = waitSet \cup {t}
 class TestSemanticJAVA(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        tokenizer_path = config.TOKENIZER_PATH
         try:
-            with open('tokenizer.pkl', 'rb') as f:
-                cls.tokenizer = pickle.load(f)
+            with open(tokenizer_path, 'rb') as f:
+                cls.tokenizer = CustomUnpickler(f).load() 
                 cls.tokenizer.parser.language = Language(tsjava.language())
         except FileNotFoundError:
             print("tokenizer state file has not been found.")
             return
 
         cls.model = RefineAI(cls.tokenizer, vocab_size=len(cls.tokenizer.vocab), num_heads=8,ff_dim = 4 * 256)
-        MODEL_PATH = 'RefineAI.pth'
-        state = torch.load(MODEL_PATH)  
+        mode_path = config.REFINEAIMODEL_PATH
+        state = torch.load(mode_path)   
         cls.model.load_state_dict(state['model_state_dict'])
         cls.model.eval()
         cls.language = 'Java'         
