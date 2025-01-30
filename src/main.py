@@ -1,45 +1,56 @@
 
-from tree_sitter import Language, Parser
-import tree_sitter_java as tsjava
-import tree_sitter_tlaplus as tstlaplus
-from ASTCodeTokenizer import ASTCodeTokenizer
-from RefineAI import RefineAI
-from Validation import Validation
-from TrainingSelfAttention import TrainingSelfAttention, CorpusFile
-from TrainingCrossAttention import TrainingCrosssAttention
+import os
 import torch
 import torch.nn as nn
 import pickle
 import json
 import argparse
+from tree_sitter import Language, Parser
+import tree_sitter_java as tsjava
+import tree_sitter_tlaplus as tstlaplus
+from src.ASTCodeTokenizer import ASTCodeTokenizer
+from src.RefineAI import RefineAI
+from src.Validation import Validation
+from src.TrainingSelfAttention import TrainingSelfAttention, CorpusFile
+from src.TrainingCrossAttention import TrainingCrosssAttention
 
-CORPUS_FILE_TLAPLUS = 'tla_code_corpus_extended.txt'
-CORPUS_FILE_JAVA = 'java_code_corpus.txt'
-MAPPING_DATASET = 'mapping_dataset.json'
-MAPPING_DATASET_VALIDATION = 'mapping_dataset_validation.json'
+
+RAW_FILE_TLAPLUS = 'data/tla_code_corpus_extended.txt'
+RAW_FILE_JAVA = 'data/java_code_corpus.txt'
+MAPPING_DATASET = 'data/mapping_dataset.json'
+MAPPING_DATASET_VALIDATION = 'data/mapping_dataset_validation.json'
+REFINEAIMODEL_PATH = 'model/RefineAI.pth'
 JAVA_LANGUAGE = Language(tsjava.language())
 TLAPLUS_LANGUAGE = Language(tstlaplus.language())
-# Create parser instances for each language
-java_parser = Parser()
-java_parser.language=JAVA_LANGUAGE
-tlaplus_parser = Parser()
-tlaplus_parser.language=TLAPLUS_LANGUAGE
 
-REFINEAIMODEL_PATH = 'RefineAI.pth'
-# Load the tokenizer from a file if it exists, otherwise create a new one
-try:
-    with open('tokenizer.pkl', 'rb') as f:
-        tokenizer = pickle.load(f)
-except FileNotFoundError:
-    print("tokenizer state file has not been found.")
-    tokenizer = ASTCodeTokenizer(tlaplus_parser)  # Initialize a new tokenizer if not found
-    tokenizer.train_bpe_tokenizer([CORPUS_FILE_TLAPLUS,CORPUS_FILE_JAVA])
 
-embed_dim = 256
-num_heads = 8
-ff_dim = 4 * embed_dim
+def check_file_exist(files):
+    # Check for the existence of each required file
+    missing_files = [file for file in files if not os.path.isfile(file)]
+
+    if missing_files:
+        missing_files_list = '\n'.join(missing_files)
+        raise FileNotFoundError(f"The following required files are missing:\n{missing_files_list}\nPlease ensure these files exist.")
+
+def load_tokenizer():
+
+    try:
+        with open('tokenizer.pkl', 'rb') as f:
+            tokenizer = pickle.load(f)
+            return tokenizer
+    except FileNotFoundError:
+        print("Warning! Tokenizer state file has not been found. Continues with creating a new tokenizer instance.")
+        tokenizer = ASTCodeTokenizer()  # Initialize a new tokenizer if not found
+        tokenizer.train_bpe_tokenizer([RAW_FILE_JAVA,RAW_FILE_TLAPLUS])
+        return tokenizer
+
 
 def load_weights_from_saved_model(model_path, task):
+
+    tokenizer = load_tokenizer()
+    embed_dim = 256
+    num_heads = 8
+    ff_dim = 4 * embed_dim
     vocab_size = len(tokenizer.vocab)
     print("Current vocab size is: ", vocab_size)
     # Create the model
@@ -100,8 +111,12 @@ Spec == Init /\ [][Next]_vars
 """
     language = 'TLA'
     task = 'mlm'
+    tokenizer = load_tokenizer()
     tokenizer.parser.language = TLAPLUS_LANGUAGE
     #load from trained model
+    embed_dim = 256
+    num_heads = 8
+    ff_dim = 4 * embed_dim
     vocab_size = len(tokenizer.vocab)
     model = RefineAI(tokenizer, vocab_size, num_heads,ff_dim)
     state = torch.load(REFINEAIMODEL_PATH)
@@ -115,11 +130,14 @@ Spec == Init /\ [][Next]_vars
 
 
 def doTrainSelfAttention():
-
+    files = [RAW_FILE_JAVA,RAW_FILE_TLAPLUS]
+    check_file_exist(files)
+    tokenizer = load_tokenizer()
     tokenizer.parser.language = TLAPLUS_LANGUAGE
-    tla_corpus = CorpusFile(CORPUS_FILE_TLAPLUS, '__END_OF_CODE__', tokenizer)
+    tla_corpus = CorpusFile(RAW_FILE_TLAPLUS, '__END_OF_CODE__', tokenizer)
+    
     tokenizer.parser.language = JAVA_LANGUAGE
-    java_corpus = CorpusFile(CORPUS_FILE_JAVA, '__END_OF_CODE__', tokenizer)
+    java_corpus = CorpusFile(RAW_FILE_JAVA, '__END_OF_CODE__', tokenizer)
     
     model = load_weights_from_saved_model(REFINEAIMODEL_PATH, "self")
 
@@ -139,7 +157,9 @@ def doTrainSelfAttention():
 
 
 def doTrainCrossAttention():
-    
+    files = [REFINEAIMODEL_PATH,MAPPING_DATASET]
+    check_file_exist(files)
+    tokenizer = load_tokenizer()
     model = load_weights_from_saved_model(REFINEAIMODEL_PATH, "alignment")
     with open(MAPPING_DATASET, 'r') as f:
         examples = json.load(f)
@@ -156,6 +176,7 @@ def doTrainCrossAttention():
     trainer.save_model_state(REFINEAIMODEL_PATH)
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser(prog="Refinement AI",description="""This program fine-tunes CodeBERT to identify the implementation of state variables from TLA+ in Java. 
                                      It combines masked language modeling (MLM) and next token prediction (NTP) tasks to understand the structure of TLA+ and Java individually. 
                                      A cross-alignment task then maps semantically relevant elements from TLA+ state variables to their Java counterparts. """) 

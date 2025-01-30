@@ -3,7 +3,7 @@ from tree_sitter import Language, Parser
 import tree_sitter_java as tsjava
 import tree_sitter_tlaplus as tstlaplus
 
-from RefineAI import RefineAI
+from src.RefineAI import RefineAI
 import pickle
 import torch
 import json
