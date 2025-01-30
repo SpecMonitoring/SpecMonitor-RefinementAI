@@ -1,0 +1,6 @@
+RAW_FILE_TLAPLUS = 'data/tla_code_corpus_extended.txt'
+RAW_FILE_JAVA = 'data/java_code_corpus.txt'
+MAPPING_DATASET = 'data/mapping_dataset.json'
+MAPPING_DATASET_VALIDATION = 'data/mapping_dataset_validation.json'
+REFINEAIMODEL_PATH = 'model/RefineAI.pth'
+TOKENIZER_PATH = 'model/tokenizer.pkl'
