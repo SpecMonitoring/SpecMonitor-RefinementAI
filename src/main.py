@@ -146,8 +146,8 @@ def do_train_self_attention():
         java_corpus=java_corpus
     )
     trainer.train()
-    trainer.save_model_state(REFINEAIMODEL_PATH)
-    with open(TOKENIZER_PATH, 'wb') as f:
+    trainer.save_model_state(config.REFINEAIMODEL_PATH)
+    with open(config.TOKENIZER_PATH, 'wb') as f:
         pickle.dump(tokenizer, f)
 
 
