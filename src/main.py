@@ -35,7 +35,7 @@ def check_file_exist(files):
 def load_tokenizer():
 
     try:
-        with open('tokenizer.pkl', 'rb') as f:
+        with open('model/tokenizer.pkl', 'rb') as f:
             tokenizer = pickle.load(f)
             return tokenizer
     except FileNotFoundError:
