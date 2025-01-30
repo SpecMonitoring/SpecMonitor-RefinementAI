@@ -5,22 +5,16 @@ import torch.nn as nn
 import pickle
 import json
 import argparse
-from tree_sitter import Language, Parser
+from tree_sitter import Language
 import tree_sitter_java as tsjava
 import tree_sitter_tlaplus as tstlaplus
+import config
 from src.ASTCodeTokenizer import ASTCodeTokenizer
 from src.RefineAI import RefineAI
 from src.Validation import Validation
 from src.TrainingSelfAttention import TrainingSelfAttention, CorpusFile
 from src.TrainingCrossAttention import TrainingCrosssAttention
 
-
-RAW_FILE_TLAPLUS = 'data/tla_code_corpus_extended.txt'
-RAW_FILE_JAVA = 'data/java_code_corpus.txt'
-MAPPING_DATASET = 'data/mapping_dataset.json'
-MAPPING_DATASET_VALIDATION = 'data/mapping_dataset_validation.json'
-REFINEAIMODEL_PATH = 'model/RefineAI.pth'
-TOKENIZER_PATH = 'model/tokenizer.pkl'
 JAVA_LANGUAGE = Language(tsjava.language())
 TLAPLUS_LANGUAGE = Language(tstlaplus.language())
 
@@ -36,13 +30,13 @@ def check_file_exist(files):
 def load_tokenizer():
 
     try:
-        with open(TOKENIZER_PATH, 'rb') as f:
+        with open(config.TOKENIZER_PATH, 'rb') as f:
             tokenizer = pickle.load(f)
             return tokenizer
     except FileNotFoundError:
         print("Warning! Tokenizer state file has not been found. Continues with creating a new tokenizer instance.")
         tokenizer = ASTCodeTokenizer()  # Initialize a new tokenizer if not found
-        tokenizer.train_bpe_tokenizer([RAW_FILE_JAVA,RAW_FILE_TLAPLUS])
+        tokenizer.train_bpe_tokenizer([config.RAW_FILE_JAVA,config.RAW_FILE_TLAPLUS])
         return tokenizer
 
 
@@ -120,7 +114,7 @@ Spec == Init /\ [][Next]_vars
     ff_dim = 4 * embed_dim
     vocab_size = len(tokenizer.vocab)
     model = RefineAI(tokenizer, vocab_size, num_heads,ff_dim)
-    state = torch.load(REFINEAIMODEL_PATH)
+    state = torch.load(config.REFINEAIMODEL_PATH)
     model.load_state_dict(state['model_state_dict'],strict=False)
     model.eval() 
     token_ids = tokenizer.encode(example_code)
@@ -131,16 +125,16 @@ Spec == Init /\ [][Next]_vars
 
 
 def do_train_self_attention():
-    files = [RAW_FILE_JAVA,RAW_FILE_TLAPLUS]
+    files = [config.RAW_FILE_JAVA,config.RAW_FILE_TLAPLUS]
     check_file_exist(files)
     tokenizer = load_tokenizer()
     tokenizer.parser.language = TLAPLUS_LANGUAGE
-    tla_corpus = CorpusFile(RAW_FILE_TLAPLUS, '__END_OF_CODE__', tokenizer)
+    tla_corpus = CorpusFile(config.RAW_FILE_TLAPLUS, '__END_OF_CODE__', tokenizer)
     
     tokenizer.parser.language = JAVA_LANGUAGE
-    java_corpus = CorpusFile(RAW_FILE_JAVA, '__END_OF_CODE__', tokenizer)
+    java_corpus = CorpusFile(config.RAW_FILE_JAVA, '__END_OF_CODE__', tokenizer)
     
-    model = load_weights_from_saved_model(REFINEAIMODEL_PATH, "self")
+    model = load_weights_from_saved_model(config.REFINEAIMODEL_PATH, "self")
 
     trainer = TrainingSelfAttention(
         model=model,
@@ -158,11 +152,11 @@ def do_train_self_attention():
 
 
 def do_train_cross_attention():
-    files = [REFINEAIMODEL_PATH,MAPPING_DATASET]
+    files = [config.REFINEAIMODEL_PATH,config.MAPPING_DATASET]
     check_file_exist(files)
     tokenizer = load_tokenizer()
-    model = load_weights_from_saved_model(REFINEAIMODEL_PATH, "alignment")
-    with open(MAPPING_DATASET, 'r') as f:
+    model = load_weights_from_saved_model(config.REFINEAIMODEL_PATH, "alignment")
+    with open(config.MAPPING_DATASET, 'r') as f:
         examples = json.load(f)
     # Create the trainer
     trainer = TrainingCrosssAttention(
@@ -174,7 +168,7 @@ def do_train_cross_attention():
     )
 
     trainer.train()
-    trainer.save_model_state(REFINEAIMODEL_PATH)
+    trainer.save_model_state(config.REFINEAIMODEL_PATH)
 
 if __name__ == "__main__":
 
