@@ -7,11 +7,15 @@ from src.RefineAI import RefineAI
 import pickle
 import torch
 import json
+import config
 
-
-REFINEAIMODEL_PATH = 'RefineAI.pth'
-TEST_DATASET = 'mapping_dataset_validation.json'
-
+# The module path used when the tokenizer object was originally saved is not found when re-structured to src/*.
+class CustomUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'ASTCodeTokenizer':
+            module = 'src.ASTCodeTokenizer'
+        return super().find_class(module, name)
+    
 def __get_example_embedding(token_embeddings,token_ids, example_token_ids):
         """
         Retrieves the embedding vector for specified token ids.
@@ -158,8 +162,8 @@ def find_closest_embeddings(model, tokenizer, tla_code, java_code, tla_token, de
 
 def main():
     try:
-        with open('tokenizer.pkl', 'rb') as f:
-            tokenizer = pickle.load(f)
+        with open(config.TOKENIZER_PATH, 'rb') as f:
+            tokenizer = CustomUnpickler(f).load()
             tokenizer.parser.language = Language(tsjava.language())
     except FileNotFoundError:
             print("tokenizer state file has not been found.")
@@ -169,11 +173,11 @@ def main():
     ff_dim = 4 * embed_dim
     vocab_size = len(tokenizer.vocab)
     model = RefineAI(tokenizer, vocab_size, num_heads,ff_dim)
-    state = torch.load(REFINEAIMODEL_PATH)
+    state = torch.load(config.REFINEAIMODEL_PATH)
     model.load_state_dict(state['model_state_dict'])
     model.eval()
 
-    with open(TEST_DATASET, 'r') as f:
+    with open(config.MAPPING_DATASET_VALIDATION, 'r') as f:
         examples = json.load(f)
     
     for example in examples['examples']:
