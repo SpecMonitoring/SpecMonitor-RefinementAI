@@ -59,6 +59,36 @@ class RefineAI(nn.Module):
         # Project embeddings for alignment task
         self.alignment_linear = nn.Linear(config.hidden_size, config.hidden_size)
 
+    def __stack_attentions(self,codebert_attentions, additional_attentions):
+        """
+        Stacks CodeBERT and additional attention weights along the layer dimension.
+        
+        Args:
+            codebert_attentions (Tensor): Shape [num_codebert_layers, batch_size, num_heads, seq_len, seq_len]
+            additional_attentions (Tensor): Shape [num_additional_layers, batch_size, seq_len, seq_len]
+        
+        Returns:
+            Tensor: Stacked attention of shape [total_layers, batch_size, num_heads, seq_len, seq_len]
+        """
+        if isinstance(codebert_attentions, tuple):
+         codebert_attentions = torch.stack(codebert_attentions)
+
+        if isinstance(additional_attentions, list):
+         additional_attentions = torch.stack(additional_attentions)
+
+        if additional_attentions is None:
+            return codebert_attentions  # No additional layers, return only CodeBERT attention
+        
+        num_codebert_layers, batch_size, num_heads, seq_len, _ = codebert_attentions.shape
+        num_additional_layers, _, _, _ = additional_attentions.shape
+
+        # Expand additional attentions to match CodeBERT's head dimension
+        additional_attentions = additional_attentions.unsqueeze(2).expand(-1, -1, num_heads, -1, -1)
+        
+        # Stack along the layer dimension
+        stacked_attentions = torch.cat([codebert_attentions, additional_attentions], dim=0)
+        
+        return stacked_attentions
    
     def forward(self, token_indices,task,language='TLA'):
         
@@ -75,13 +105,15 @@ class RefineAI(nn.Module):
         # Forward pass through CodeBERT (outputs hidden states and attention weights)
         outputs = self.bert(input_ids=token_indices,attention_mask=attention_mask,output_attentions=True)
         hidden_states = outputs.last_hidden_state
-        attention_weights = outputs.attentions  # [num_layers, batch_size, num_heads, seq_len, seq_len]
+        codebert_attentions = outputs.attentions  # [num_layers, batch_size, num_heads, seq_len, seq_len]
         
         causal_mask = None
         if task.lower() == 'ntp':
             seq_len = token_indices.size(1)
             causal_mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()
         padding_mask = (token_indices == self.tokenizer.vocab['__PAD__'])
+        
+        additional_attentions = []
         # Language-specific layer
         if language.lower() == 'tla':
             for layer in self.additional_layers.layers:  
@@ -90,11 +122,7 @@ class RefineAI(nn.Module):
                     src_mask=causal_mask,
                     src_key_padding_mask=padding_mask
                 ).permute(1, 0, 2)  # Revert to [batch_size, seq_len, hidden_dim]
-            
-            # Retrieve attention weights for each layer
-            """ attention_weights = [
-                layer.attention_weights for layer in self.additional_layers.layers
-            ] """
+                additional_attentions.append(layer.attention_weights)
             # Get token embeddings from hidden_states
             #token_embeddings = hidden_states
         elif language.lower() == 'java':
@@ -104,6 +132,7 @@ class RefineAI(nn.Module):
                     src_mask=causal_mask,
                     src_key_padding_mask=padding_mask
                 ).permute(1, 0, 2) 
+                additional_attentions.append(layer.attention_weights)
             # Get token embeddings from hidden_states
             #token_embeddings = hidden_states
         else:
@@ -112,7 +141,7 @@ class RefineAI(nn.Module):
         # Task-specific outputs
         if task.lower() == 'mlm' or task.lower() == 'ntp':
             logits = self.linear(hidden_states) # Project the hidden states to vocabulary space for MLM and reshape back to [batch_size, seq_len, vocab_size]
-            return logits, attention_weights
+            return logits, self.__stack_attentions(codebert_attentions,additional_attentions)
         elif task.lower() == 'alignment':
             token_embeddings = self.alignment_linear(hidden_states)
             return token_embeddings
